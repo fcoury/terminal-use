@@ -212,7 +212,7 @@ impl Session {
     pub async fn resize(&mut self, size: TermSize) -> Result<()> {
         pty::resize::resize_pty(&self.master_fd, &size)?;
         let mut parser = self.parser.lock().await;
-        parser.set_size(size.rows, size.cols);
+        parser.screen_mut().set_size(size.rows, size.cols);
         self.size = size;
         Ok(())
     }
@@ -280,6 +280,7 @@ fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
     let mut prev_fg = vt100::Color::Default;
     let mut prev_bg = vt100::Color::Default;
     let mut prev_bold = false;
+    let mut prev_dim = false;
     let mut prev_italic = false;
     let mut prev_inverse = false;
     let mut prev_underline = false;
@@ -294,6 +295,7 @@ fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
         let fg = cell.fgcolor();
         let bg = cell.bgcolor();
         let bold = cell.bold();
+        let dim = cell.dim();
         let italic = cell.italic();
         let inverse = cell.inverse();
         let underline = cell.underline();
@@ -301,6 +303,7 @@ fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
         let attrs_changed = fg != prev_fg
             || bg != prev_bg
             || bold != prev_bold
+            || dim != prev_dim
             || italic != prev_italic
             || inverse != prev_inverse
             || underline != prev_underline;
@@ -309,6 +312,9 @@ fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
             line.push_str("\x1b[0");
             if bold {
                 line.push_str(";1");
+            }
+            if dim {
+                line.push_str(";2");
             }
             if italic {
                 line.push_str(";3");
@@ -326,6 +332,7 @@ fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
             prev_fg = fg;
             prev_bg = bg;
             prev_bold = bold;
+            prev_dim = dim;
             prev_italic = italic;
             prev_inverse = inverse;
             prev_underline = underline;
@@ -354,5 +361,14 @@ mod tests {
 
         let row = render_screen_row(parser.screen(), 0, 20);
         assert!(row.contains("\x1b[0;3mitalic"));
+    }
+
+    #[test]
+    fn render_screen_row_preserves_dim_sgr() {
+        let mut parser = vt100::Parser::new(2, 20, 0);
+        parser.process(b"\x1b[2mdim\x1b[0m");
+
+        let row = render_screen_row(parser.screen(), 0, 20);
+        assert!(row.contains("\x1b[0;2mdim"));
     }
 }
