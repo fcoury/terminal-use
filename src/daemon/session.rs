@@ -150,68 +150,7 @@ impl Session {
         let mut rows = Vec::with_capacity(self.size.rows as usize);
 
         for row in 0..self.size.rows {
-            let mut line = String::new();
-            let mut prev_fg = vt100::Color::Default;
-            let mut prev_bg = vt100::Color::Default;
-            let mut prev_bold = false;
-            let mut prev_inverse = false;
-            let mut prev_underline = false;
-
-            for col in 0..self.size.cols {
-                let cell = screen.cell(row, col).unwrap();
-
-                // Skip wide continuation cells
-                if cell.is_wide_continuation() {
-                    continue;
-                }
-
-                let fg = cell.fgcolor();
-                let bg = cell.bgcolor();
-                let bold = cell.bold();
-                let inverse = cell.inverse();
-                let underline = cell.underline();
-
-                // Emit SGR changes
-                let attrs_changed = fg != prev_fg
-                    || bg != prev_bg
-                    || bold != prev_bold
-                    || inverse != prev_inverse
-                    || underline != prev_underline;
-
-                if attrs_changed {
-                    // Reset and re-apply all active attributes
-                    line.push_str("\x1b[0");
-                    if bold {
-                        line.push_str(";1");
-                    }
-                    if underline {
-                        line.push_str(";4");
-                    }
-                    if inverse {
-                        line.push_str(";7");
-                    }
-                    push_fg_sgr(&mut line, fg);
-                    push_bg_sgr(&mut line, bg);
-                    line.push('m');
-
-                    prev_fg = fg;
-                    prev_bg = bg;
-                    prev_bold = bold;
-                    prev_inverse = inverse;
-                    prev_underline = underline;
-                }
-
-                let ch = cell.contents();
-                if ch.is_empty() {
-                    line.push(' ');
-                } else {
-                    line.push_str(&ch);
-                }
-            }
-
-            // Reset at end of row
-            line.push_str("\x1b[0m");
-            rows.push(line);
+            rows.push(render_screen_row(screen, row, self.size.cols));
         }
 
         rows
@@ -333,5 +272,87 @@ fn push_bg_sgr(s: &mut String, color: vt100::Color) {
         vt100::Color::Rgb(r, g, b) => {
             s.push_str(&format!(";48;2;{};{};{}", r, g, b));
         }
+    }
+}
+
+fn render_screen_row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
+    let mut line = String::new();
+    let mut prev_fg = vt100::Color::Default;
+    let mut prev_bg = vt100::Color::Default;
+    let mut prev_bold = false;
+    let mut prev_italic = false;
+    let mut prev_inverse = false;
+    let mut prev_underline = false;
+
+    for col in 0..cols {
+        let cell = screen.cell(row, col).unwrap();
+
+        if cell.is_wide_continuation() {
+            continue;
+        }
+
+        let fg = cell.fgcolor();
+        let bg = cell.bgcolor();
+        let bold = cell.bold();
+        let italic = cell.italic();
+        let inverse = cell.inverse();
+        let underline = cell.underline();
+
+        let attrs_changed = fg != prev_fg
+            || bg != prev_bg
+            || bold != prev_bold
+            || italic != prev_italic
+            || inverse != prev_inverse
+            || underline != prev_underline;
+
+        if attrs_changed {
+            line.push_str("\x1b[0");
+            if bold {
+                line.push_str(";1");
+            }
+            if italic {
+                line.push_str(";3");
+            }
+            if underline {
+                line.push_str(";4");
+            }
+            if inverse {
+                line.push_str(";7");
+            }
+            push_fg_sgr(&mut line, fg);
+            push_bg_sgr(&mut line, bg);
+            line.push('m');
+
+            prev_fg = fg;
+            prev_bg = bg;
+            prev_bold = bold;
+            prev_italic = italic;
+            prev_inverse = inverse;
+            prev_underline = underline;
+        }
+
+        let ch = cell.contents();
+        if ch.is_empty() {
+            line.push(' ');
+        } else {
+            line.push_str(&ch);
+        }
+    }
+
+    line.push_str("\x1b[0m");
+    line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_screen_row;
+
+    #[test]
+    fn render_screen_row_preserves_italic_sgr() {
+        let mut parser = vt100::Parser::new(2, 20, 0);
+        parser.process(b"\x1b[3mitalic\x1b[0m");
+
+        let row = render_screen_row(parser.screen(), 0, 20);
+        assert!(row.contains("\x1b[0;3mitalic"));
     }
 }
